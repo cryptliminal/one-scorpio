@@ -8,6 +8,15 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- KaTeX for LaTeX Math Rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+  <!-- Marked.js for Markdown Rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+
   <style>
     body { 
       background-color: #0b0f17; 
@@ -17,6 +26,21 @@
     .custom-scroll::-webkit-scrollbar-track { background: transparent; }
     .custom-scroll::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 9999px; }
     .custom-scroll::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+    /* Markdown & LaTeX Rich Formatting */
+    .chat-bubble p { margin-bottom: 0.5rem; }
+    .chat-bubble p:last-child { margin-bottom: 0; }
+    .chat-bubble strong { font-weight: 600; color: inherit; }
+    .chat-bubble ul { list-style-type: disc; padding-left: 1.25rem; margin-bottom: 0.5rem; }
+    .chat-bubble ol { list-style-type: decimal; padding-left: 1.25rem; margin-bottom: 0.5rem; }
+    .chat-bubble li { margin-bottom: 0.25rem; }
+    .chat-bubble code { background-color: rgba(0, 0, 0, 0.35); padding: 0.15rem 0.35rem; border-radius: 0.25rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.85em; }
+    .chat-bubble pre { background-color: #030712; border: 1px solid #1e293b; border-radius: 0.5rem; padding: 0.75rem; margin: 0.5rem 0; overflow-x: auto; }
+    .chat-bubble pre code { background-color: transparent; padding: 0; }
+    .chat-bubble table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; font-size: 0.85em; }
+    .chat-bubble th, .chat-bubble td { border: 1px solid #334155; padding: 0.4rem 0.65rem; text-align: left; }
+    .chat-bubble th { background-color: rgba(15, 23, 42, 0.7); }
+    .katex-display { margin: 0.5rem 0 !important; overflow-x: auto; overflow-y: hidden; }
   </style>
 </head>
 <body class="text-slate-200 h-screen flex flex-col justify-between antialiased selection:bg-cyan-500/20 selection:text-cyan-300">
@@ -69,7 +93,7 @@
       </div>
       <div>
         <h2 class="text-base font-semibold text-white">How can I help you today?</h2>
-        <p class="text-xs text-slate-400 mt-1">Ask questions, analyze documents, draft professional correspondence, or automate complex business workflows.</p>
+        <p class="text-xs text-slate-400 mt-1">Ask questions, analyze documents, write formulas, or automate business workflows.</p>
       </div>
 
       <!-- Dynamic Prompt Suggestions -->
@@ -84,7 +108,7 @@
       <textarea 
         id="user-input" 
         rows="2" 
-        placeholder="Send a message to Scorpio..."
+        placeholder="Send a message to Scorpio (Markdown & LaTeX supported)..."
         class="w-full bg-transparent border-0 px-4 pt-3.5 pb-12 text-sm text-slate-100 placeholder:text-slate-500 focus:ring-0 focus:outline-none resize-none leading-relaxed"
         onkeydown="checkEnter(event)"></textarea>
       
@@ -156,6 +180,35 @@
       }
     ];
 
+    // Markdown & LaTeX Unified Parser
+    function renderRichContent(rawText, targetEl) {
+      if (!rawText || !targetEl) return;
+
+      // 1. Convert Markdown to HTML
+      if (typeof marked !== 'undefined') {
+        marked.setOptions({
+          gfm: true,
+          breaks: true
+        });
+        targetEl.innerHTML = marked.parse(rawText);
+      } else {
+        targetEl.textContent = rawText;
+      }
+
+      // 2. Render LaTeX math within the generated HTML
+      if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(targetEl, {
+          delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '$', right: '$', display: false },
+            { left: '\\[', right: '\\]', display: true },
+            { left: '\\(', right: '\\)', display: false }
+          ],
+          throwOnError: false
+        });
+      }
+    }
+
     function renderPrompts(prompts) {
       const container = document.getElementById('prompt-suggestions');
       if (!container) return;
@@ -186,13 +239,11 @@
     }
 
     async function loadDynamicSuggestions() {
-      // 1. Immediately render fallback prompts to avoid an empty UI
       const initialFallback = [...FALLBACK_BANK].sort(() => 0.5 - Math.random()).slice(0, 2);
       renderPrompts(initialFallback);
 
       if (!apiKey) return;
 
-      // 2. Query Scorpio API to dynamically invent 2 fresh prompts
       try {
         const res = await fetch(`${API_ENDPOINT}/v1/scorpio/suggestions`, {
           headers: { 'x-horizon-key': apiKey }
@@ -335,10 +386,11 @@
       if (role === 'user') {
         msgDiv.className += ' justify-end';
         msgDiv.innerHTML = `
-          <div class="max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tr-sm bg-cyan-600 text-white px-4 py-2.5 shadow-sm leading-relaxed whitespace-pre-wrap">
-            ${escapeHtml(content)}
+          <div class="chat-bubble max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tr-sm bg-cyan-600 text-white px-4 py-2.5 shadow-sm leading-relaxed break-words">
           </div>
         `;
+        const contentBox = msgDiv.querySelector('.chat-bubble');
+        renderRichContent(content, contentBox);
       } else {
         msgDiv.innerHTML = `
           <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-cyan-600 to-blue-500 flex items-center justify-center shrink-0 mt-0.5 shadow-md shadow-cyan-950">
@@ -346,10 +398,11 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
-          <div class="max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tl-sm bg-slate-900 border border-slate-800/80 px-4 py-3 text-slate-200 shadow-sm leading-relaxed whitespace-pre-wrap">
-            ${escapeHtml(content)}
+          <div class="chat-bubble max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tl-sm bg-slate-900 border border-slate-800/80 px-4 py-3 text-slate-200 shadow-sm leading-relaxed break-words">
           </div>
         `;
+        const contentBox = msgDiv.querySelector('.chat-bubble');
+        renderRichContent(content, contentBox);
       }
 
       stream.appendChild(msgDiv);
