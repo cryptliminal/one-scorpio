@@ -72,7 +72,7 @@
         <p class="text-xs text-slate-400 mt-1">Ask questions, analyze documents, draft professional correspondence, or automate complex business workflows.</p>
       </div>
 
-      <!-- Dynamic Random Prompt Suggestion Container -->
+      <!-- Dynamic Prompt Suggestions -->
       <div id="prompt-suggestions" class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 text-left"></div>
     </div>
 
@@ -130,9 +130,10 @@
     let apiKey = localStorage.getItem('hz_scorpio_key') || null;
     let messageHistory = [];
     let userTier = 'free';
+    let activePrompts = [];
 
-    // Randomized Business Prompt Pool
-    const PROMPT_BANK = [
+    // Fallback prompt pool displayed while the model generates fresh ones
+    const FALLBACK_BANK = [
       {
         title: "Draft professional proposal",
         desc: "Outlining implementation scope",
@@ -152,49 +153,61 @@
         title: "Audit workflow bottleneck",
         desc: "Identify automation opportunities",
         prompt: "Analyze our daily operations to highlight redundant digital tasks and suggest 3 high-impact workflows we can automate."
-      },
-      {
-        title: "Executive follow-up email",
-        desc: "Polite check-in on pending contracts",
-        prompt: "Draft a firm but courteous follow-up email to a prospective client regarding our pending project agreement."
-      },
-      {
-        title: "Social media announcement",
-        desc: "Engaging release notice for clients",
-        prompt: "Write an engaging, clear announcement detailing our new automated service features and launch offer."
-      },
-      {
-        title: "Standard operating procedure",
-        desc: "Step-by-step operating guide",
-        prompt: "Create a standard operating procedure (SOP) document for onboarding new client accounts cleanly and securely."
-      },
-      {
-        title: "Competitive feature analysis",
-        desc: "Compare strengths vs alternatives",
-        prompt: "Help me break down the competitive advantages of custom-built internal AI tools over off-the-shelf software subscriptions."
       }
     ];
 
-    function renderRandomPrompts(count = 2) {
+    function renderPrompts(prompts) {
       const container = document.getElementById('prompt-suggestions');
       if (!container) return;
 
-      const shuffled = [...PROMPT_BANK].sort(() => 0.5 - Math.random());
-      const selected = shuffled.slice(0, count);
-
-      container.innerHTML = selected.map(item => `
+      activePrompts = prompts;
+      container.innerHTML = activePrompts.map((item, index) => `
         <button 
           type="button"
-          onclick="populatePrompt(${JSON.stringify(item.prompt)})" 
-          class="p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800/80 border border-slate-800 text-xs text-slate-300 transition text-left focus:outline-none focus:border-cyan-500/50">
+          onclick="selectPromptByIndex(${index})" 
+          class="p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800/80 border border-slate-800 text-xs text-slate-300 transition text-left focus:outline-none focus:border-cyan-500/50 cursor-pointer">
           <div class="font-medium text-slate-200">${escapeHtml(item.title)}</div>
           <div class="text-[11px] text-slate-500 mt-0.5 truncate">${escapeHtml(item.desc)}</div>
         </button>
       `).join('');
     }
 
+    function selectPromptByIndex(index) {
+      if (activePrompts[index]) {
+        populatePrompt(activePrompts[index].prompt);
+      }
+    }
+
+    function populatePrompt(text) {
+      const input = document.getElementById('user-input');
+      if (!input) return;
+      input.value = text;
+      input.focus();
+    }
+
+    async function loadDynamicSuggestions() {
+      // 1. Immediately render fallback prompts to avoid an empty UI
+      const initialFallback = [...FALLBACK_BANK].sort(() => 0.5 - Math.random()).slice(0, 2);
+      renderPrompts(initialFallback);
+
+      if (!apiKey) return;
+
+      // 2. Query Scorpio API to dynamically invent 2 fresh prompts
+      try {
+        const res = await fetch(`${API_ENDPOINT}/v1/scorpio/suggestions`, {
+          headers: { 'x-horizon-key': apiKey }
+        });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.suggestions) && data.suggestions.length > 0) {
+          renderPrompts(data.suggestions);
+        }
+      } catch (err) {
+        // Silently preserve the fallback prompts if offline or unauthenticated
+      }
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
-      renderRandomPrompts(2);
+      loadDynamicSuggestions();
 
       if (!apiKey) {
         document.getElementById('key-modal').classList.remove('hidden');
@@ -221,6 +234,7 @@
       localStorage.setItem('hz_scorpio_key', apiKey);
       document.getElementById('key-modal').classList.add('hidden');
       verifyKeyAndStatus();
+      loadDynamicSuggestions();
     }
 
     async function verifyKeyAndStatus() {
@@ -250,12 +264,6 @@
         pulse.className = 'w-1.5 h-1.5 bg-red-400 rounded-full';
         tag.textContent = `Connection failed (${err.message})`;
       }
-    }
-
-    function populatePrompt(text) {
-      const input = document.getElementById('user-input');
-      input.value = text;
-      input.focus();
     }
 
     function checkEnter(e) {
