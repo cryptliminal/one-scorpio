@@ -72,17 +72,8 @@
         <p class="text-xs text-slate-400 mt-1">Ask questions, analyze documents, draft professional correspondence, or automate complex business workflows.</p>
       </div>
 
-      <!-- Quick Prompt Suggestion Pills -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 text-left">
-        <button onclick="populatePrompt('Draft a concise professional email proposing our new software implementation.')" class="p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800/80 border border-slate-800 text-xs text-slate-300 transition">
-          <div class="font-medium text-slate-200">Draft professional proposal</div>
-          <div class="text-[11px] text-slate-500 mt-0.5 truncate">Outlining implementation scope</div>
-        </button>
-        <button onclick="populatePrompt('Summarize key performance indicators and outline action steps for our team meeting.')" class="p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800/80 border border-slate-800 text-xs text-slate-300 transition">
-          <div class="font-medium text-slate-200">Meeting briefing</div>
-          <div class="text-[11px] text-slate-500 mt-0.5 truncate">Summarize KPIs & action steps</div>
-        </button>
-      </div>
+      <!-- Dynamic Random Prompt Suggestion Container -->
+      <div id="prompt-suggestions" class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 text-left"></div>
     </div>
 
   </main>
@@ -140,7 +131,71 @@
     let messageHistory = [];
     let userTier = 'free';
 
+    // Randomized Business Prompt Pool
+    const PROMPT_BANK = [
+      {
+        title: "Draft professional proposal",
+        desc: "Outlining implementation scope",
+        prompt: "Draft a concise, high-impact project proposal outlining implementation scope, deliverables, and a timeline for a client."
+      },
+      {
+        title: "Meeting briefing & KPIs",
+        desc: "Summarize priorities & action steps",
+        prompt: "Structure an executive meeting briefing summarizing our monthly goals, key performance indicators, and immediate action items."
+      },
+      {
+        title: "Customer support FAQ",
+        desc: "Generate fast response templates",
+        prompt: "Draft 5 clear, polite, and effective customer support FAQ responses covering common inquiries, orders, and turnaround times."
+      },
+      {
+        title: "Audit workflow bottleneck",
+        desc: "Identify automation opportunities",
+        prompt: "Analyze our daily operations to highlight redundant digital tasks and suggest 3 high-impact workflows we can automate."
+      },
+      {
+        title: "Executive follow-up email",
+        desc: "Polite check-in on pending contracts",
+        prompt: "Draft a firm but courteous follow-up email to a prospective client regarding our pending project agreement."
+      },
+      {
+        title: "Social media announcement",
+        desc: "Engaging release notice for clients",
+        prompt: "Write an engaging, clear announcement detailing our new automated service features and launch offer."
+      },
+      {
+        title: "Standard operating procedure",
+        desc: "Step-by-step operating guide",
+        prompt: "Create a standard operating procedure (SOP) document for onboarding new client accounts cleanly and securely."
+      },
+      {
+        title: "Competitive feature analysis",
+        desc: "Compare strengths vs alternatives",
+        prompt: "Help me break down the competitive advantages of custom-built internal AI tools over off-the-shelf software subscriptions."
+      }
+    ];
+
+    function renderRandomPrompts(count = 2) {
+      const container = document.getElementById('prompt-suggestions');
+      if (!container) return;
+
+      const shuffled = [...PROMPT_BANK].sort(() => 0.5 - Math.random());
+      const selected = shuffled.slice(0, count);
+
+      container.innerHTML = selected.map(item => `
+        <button 
+          type="button"
+          onclick="populatePrompt(${JSON.stringify(item.prompt)})" 
+          class="p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800/80 border border-slate-800 text-xs text-slate-300 transition text-left focus:outline-none focus:border-cyan-500/50">
+          <div class="font-medium text-slate-200">${escapeHtml(item.title)}</div>
+          <div class="text-[11px] text-slate-500 mt-0.5 truncate">${escapeHtml(item.desc)}</div>
+        </button>
+      `).join('');
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
+      renderRandomPrompts(2);
+
       if (!apiKey) {
         document.getElementById('key-modal').classList.remove('hidden');
       } else {
