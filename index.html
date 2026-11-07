@@ -9,13 +9,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   
-  <!-- KaTeX for LaTeX Math Rendering -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
-
   <!-- Marked.js for Markdown Rendering -->
   <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+
+  <!-- KaTeX for LaTeX Math Rendering (Loaded synchronously to avoid render race conditions) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
 
   <style>
     body { 
@@ -180,23 +180,43 @@
       }
     ];
 
-    // Markdown & LaTeX Unified Parser
+    // Markdown & LaTeX Unified Parser (Shields LaTeX from marked mangling)
     function renderRichContent(rawText, targetEl) {
       if (!rawText || !targetEl) return;
 
-      // 1. Convert Markdown to HTML
+      const mathBlocks = [];
+
+      // 1. Stash display math $$...$$
+      let safeText = rawText.replace(/\$\$([\s\S]+?)\$\$/g, (match) => {
+        mathBlocks.push(match);
+        return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
+      });
+
+      // 2. Stash inline math $...$
+      safeText = safeText.replace(/\$([^\$\n]+?)\$/g, (match) => {
+        mathBlocks.push(match);
+        return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
+      });
+
+      // 3. Parse Markdown safely
+      let parsedHtml = safeText;
       if (typeof marked !== 'undefined') {
         marked.setOptions({
           gfm: true,
           breaks: true
         });
-        targetEl.innerHTML = marked.parse(rawText);
-      } else {
-        targetEl.textContent = rawText;
+        parsedHtml = marked.parse(safeText);
       }
 
-      // 2. Render LaTeX math within the generated HTML
-      if (typeof renderMathInElement !== 'undefined') {
+      // 4. Restore math expressions back into HTML
+      parsedHtml = parsedHtml.replace(/@@@MATH_BLOCK_(\d+)@@@/g, (match, index) => {
+        return mathBlocks[parseInt(index, 10)] || match;
+      });
+
+      targetEl.innerHTML = parsedHtml;
+
+      // 5. Render with KaTeX
+      if (typeof renderMathInElement === 'function') {
         renderMathInElement(targetEl, {
           delimiters: [
             { left: '$$', right: '$$', display: true },
