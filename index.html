@@ -520,7 +520,6 @@
 
       messageHistory.push({ role: 'user', content: text });
       const loaderId = appendThinkingIndicator();
-      const statusLabel = document.getElementById('loader-status-text');
 
       try {
         const res = await fetch(`${API_ENDPOINT}/v1/scorpio/chat`, {
@@ -547,22 +546,28 @@
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split('\n\n');
-          buffer = parts.pop();
 
-          for (const part of parts) {
-            const trimmed = part.trim();
-            if (!trimmed.startsWith('data: ')) continue;
-            
+          // Parse double newline boundary for SSE frames
+          let boundary = buffer.indexOf('\n\n');
+          while (boundary !== -1) {
+            const rawEvent = buffer.slice(0, boundary).trim();
+            buffer = buffer.slice(boundary + 2);
+            boundary = buffer.indexOf('\n\n');
+
+            if (!rawEvent.startsWith('data: ')) continue;
+
             let eventData;
             try {
-              eventData = JSON.parse(trimmed.replace('data: ', ''));
+              eventData = JSON.parse(rawEvent.replace(/^data:\s*/, ''));
             } catch (err) {
               continue;
             }
 
             if (eventData.type === 'status') {
-              if (statusLabel) statusLabel.textContent = eventData.text;
+              const label = document.getElementById('loader-status-text');
+              if (label) {
+                label.textContent = eventData.text;
+              }
             } else if (eventData.type === 'done') {
               removeMessage(loaderId);
 
