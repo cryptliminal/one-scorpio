@@ -12,7 +12,7 @@
   <!-- Marked.js for Markdown Rendering -->
   <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
 
-  <!-- KaTeX for LaTeX Math Rendering (Loaded synchronously to avoid render race conditions) -->
+  <!-- KaTeX for LaTeX Math Rendering -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
@@ -93,7 +93,7 @@
       </div>
       <div>
         <h2 class="text-base font-semibold text-white">How can I help you today?</h2>
-        <p class="text-xs text-slate-400 mt-1">Ask questions, analyze documents, write formulas, or automate business workflows.</p>
+        <p class="text-xs text-slate-400 mt-1">Ask questions, analyze images and documents, write formulas, or automate business workflows.</p>
       </div>
 
       <!-- Dynamic Prompt Suggestions -->
@@ -105,15 +105,42 @@
   <!-- INPUT CONTROLS -->
   <footer class="max-w-4xl w-full mx-auto p-4 md:pb-6 shrink-0">
     <form id="chat-form" onsubmit="handleSend(event)" class="relative flex flex-col bg-slate-900/90 border border-slate-800 focus-within:border-cyan-500/80 rounded-2xl shadow-xl transition-all">
+      
+      <!-- Staged Image Preview Pill -->
+      <div id="image-preview-container" class="hidden px-4 pt-3 items-center space-x-2">
+        <div class="relative inline-block">
+          <img id="image-preview" src="" class="h-14 w-14 object-cover rounded-xl border border-slate-700 shadow-md">
+          <button type="button" onclick="clearAttachedImage()" class="absolute -top-1.5 -right-1.5 bg-red-600 hover:bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px] font-bold shadow">
+            &times;
+          </button>
+        </div>
+        <span class="text-[11px] text-slate-400 font-mono">Image attached</span>
+      </div>
+
       <textarea 
         id="user-input" 
         rows="2" 
-        placeholder="Send a message to Scorpio (Markdown & LaTeX supported)..."
+        placeholder="Send a message to Scorpio (attach or paste images, LaTeX & Markdown supported)..."
         class="w-full bg-transparent border-0 px-4 pt-3.5 pb-12 text-sm text-slate-100 placeholder:text-slate-500 focus:ring-0 focus:outline-none resize-none leading-relaxed"
         onkeydown="checkEnter(event)"></textarea>
       
       <div class="absolute bottom-2.5 right-3 flex items-center space-x-2">
+        <!-- Hidden File Input -->
+        <input type="file" id="image-file-input" accept="image/*" class="hidden" onchange="handleFileSelect(event)">
+        
+        <!-- Upload Attachment Button -->
+        <button 
+          type="button" 
+          onclick="document.getElementById('image-file-input').click()"
+          title="Attach image"
+          class="p-2 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-xl transition">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
+          </svg>
+        </button>
+
         <span class="text-[10px] text-slate-500 hidden sm:inline">Press Enter to send</span>
+
         <button 
           type="submit" 
           id="send-btn"
@@ -155,6 +182,7 @@
     let messageHistory = [];
     let userTier = 'free';
     let activePrompts = [];
+    let stagedImageBase64 = null;
 
     // Fallback prompt pool displayed while the model generates fresh ones
     const FALLBACK_BANK = [
@@ -180,25 +208,37 @@
       }
     ];
 
-    // Markdown & LaTeX Unified Parser (Shields LaTeX from marked mangling)
+    // Markdown & LaTeX Unified Parser (Shields all LaTeX brackets & slashes from marked)
     function renderRichContent(rawText, targetEl) {
       if (!rawText || !targetEl) return;
 
       const mathBlocks = [];
 
-      // 1. Stash display math $$...$$
-      let safeText = rawText.replace(/\$\$([\s\S]+?)\$\$/g, (match) => {
+      // 1. Shield display brackets \[ ... \]
+      let safeText = rawText.replace(/\\\[([\s\S]+?)\\\]/g, (match) => {
         mathBlocks.push(match);
         return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
       });
 
-      // 2. Stash inline math $...$
+      // 2. Shield inline parentheses \( ... \)
+      safeText = safeText.replace(/\\\(([\s\S]+?)\\\)/g, (match) => {
+        mathBlocks.push(match);
+        return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
+      });
+
+      // 3. Shield display dollar signs $$ ... $$
+      safeText = safeText.replace(/\$\$([\s\S]+?)\$\$/g, (match) => {
+        mathBlocks.push(match);
+        return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
+      });
+
+      // 4. Shield inline dollar signs $ ... $
       safeText = safeText.replace(/\$([^\$\n]+?)\$/g, (match) => {
         mathBlocks.push(match);
         return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
       });
 
-      // 3. Parse Markdown safely
+      // 5. Parse Markdown safely
       let parsedHtml = safeText;
       if (typeof marked !== 'undefined') {
         marked.setOptions({
@@ -208,14 +248,14 @@
         parsedHtml = marked.parse(safeText);
       }
 
-      // 4. Restore math expressions back into HTML
+      // 6. Restore math expressions back into HTML
       parsedHtml = parsedHtml.replace(/@@@MATH_BLOCK_(\d+)@@@/g, (match, index) => {
         return mathBlocks[parseInt(index, 10)] || match;
       });
 
       targetEl.innerHTML = parsedHtml;
 
-      // 5. Render with KaTeX
+      // 7. Render with KaTeX
       if (typeof renderMathInElement === 'function') {
         renderMathInElement(targetEl, {
           delimiters: [
@@ -227,6 +267,42 @@
           throwOnError: false
         });
       }
+    }
+
+    // Image Upload & Clipboard Handling
+    function handleFileSelect(e) {
+      const file = e.target.files[0];
+      if (file) processImageFile(file);
+    }
+
+    document.addEventListener('paste', (e) => {
+      const items = (e.clipboardData || e.originalEvent?.clipboardData)?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          processImageFile(item.getAsFile());
+          break;
+        }
+      }
+    });
+
+    function processImageFile(file) {
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        stagedImageBase64 = evt.target.result;
+        document.getElementById('image-preview').src = stagedImageBase64;
+        document.getElementById('image-preview-container').classList.remove('hidden');
+        document.getElementById('image-preview-container').classList.add('flex');
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function clearAttachedImage() {
+      stagedImageBase64 = null;
+      document.getElementById('image-file-input').value = '';
+      document.getElementById('image-preview').src = '';
+      document.getElementById('image-preview-container').classList.add('hidden');
+      document.getElementById('image-preview-container').classList.remove('flex');
     }
 
     function renderPrompts(prompts) {
@@ -273,7 +349,7 @@
           renderPrompts(data.suggestions);
         }
       } catch (err) {
-        // Silently preserve the fallback prompts if offline or unauthenticated
+        // Preserves fallback prompts if network or auth error occurs
       }
     }
 
@@ -349,23 +425,23 @@
       const inputEl = document.getElementById('user-input');
       const sendBtn = document.getElementById('send-btn');
       const text = inputEl.value.trim();
-      if (!text || !apiKey) return;
+      const imageToSend = stagedImageBase64;
 
-      // Hide welcome hero on first message
+      if ((!text && !imageToSend) || !apiKey) return;
+
       const welcomeCard = document.getElementById('welcome-card');
       if (welcomeCard) welcomeCard.remove();
 
-      // Append User Message to UI
-      appendMessage('user', text);
+      appendMessage('user', text, imageToSend);
       inputEl.value = '';
+      clearAttachedImage();
+
       sendBtn.disabled = true;
       sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
 
       messageHistory.push({ role: 'user', content: text });
 
       const agentRequested = document.getElementById('agent-mode')?.checked || false;
-
-      // Thinking State Indicator
       const loaderId = appendThinkingIndicator();
 
       try {
@@ -377,7 +453,8 @@
           },
           body: JSON.stringify({
             messages: messageHistory,
-            agentModeRequested: agentRequested
+            agentModeRequested: agentRequested,
+            imageBase64: imageToSend
           })
         });
 
@@ -398,18 +475,21 @@
       }
     }
 
-    function appendMessage(role, content) {
+    function appendMessage(role, content, attachedImg = null) {
       const stream = document.getElementById('chat-stream');
       const msgDiv = document.createElement('div');
       msgDiv.className = 'flex items-start space-x-3 text-sm';
 
       if (role === 'user') {
         msgDiv.className += ' justify-end';
+        let imgHtml = attachedImg ? `<img src="${attachedImg}" class="max-h-52 rounded-xl mb-2.5 border border-cyan-400/30 object-contain block shadow">` : '';
         msgDiv.innerHTML = `
           <div class="chat-bubble max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tr-sm bg-cyan-600 text-white px-4 py-2.5 shadow-sm leading-relaxed break-words">
+            ${imgHtml}
+            <div class="user-text-body"></div>
           </div>
         `;
-        const contentBox = msgDiv.querySelector('.chat-bubble');
+        const contentBox = msgDiv.querySelector('.user-text-body');
         renderRichContent(content, contentBox);
       } else {
         msgDiv.innerHTML = `
