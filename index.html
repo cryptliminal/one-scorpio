@@ -208,12 +208,22 @@
 
       let safeText = rawText.replace(/\\\[([\s\S]+?)\\\]/g, (match) => {
         mathBlocks.push(match);
-        return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`; });  safeText = safeText.replace(/\\\(([\s\S]+?)\\\)/g, (match) => { mathBlocks.push(match); return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
+        return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
+      });
+
+      safeText = safeText.replace(/\\\(([\s\S]+?)\\\)/g, (match) => {
+        mathBlocks.push(match);
+        return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
       });
 
       safeText = safeText.replace(/\$\$([\s\S]+?)\$\$/g, (match) => {
         mathBlocks.push(match);
-        return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`; });  safeText = safeText.replace(/\$([^\$\n]+?)\$/g, (match) => { mathBlocks.push(match); return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
+        return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
+      });
+
+      safeText = safeText.replace(/\$([^\$\n]+?)\$/g, (match) => {
+        mathBlocks.push(match);
+        return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
       });
 
       let parsedHtml = safeText;
@@ -304,7 +314,21 @@
 
       if (!apiKey) return;
       try {
-        const res = await fetch(`${API_ENDPOINT}/v1/scorpio/suggestions`, { headers: { 'x-horizon-key': apiKey } }); const data = await res.json(); if (data.success && Array.isArray(data.suggestions) && data.suggestions.length > 0) { renderPrompts(data.suggestions); } } catch (err) {} }  // --- SIDEBAR & SESSION MANAGEMENT --- async function loadSessions() { if (!apiKey) return; try { const res = await fetch(`${API_ENDPOINT}/v1/scorpio/sessions`, {
+        const res = await fetch(`${API_ENDPOINT}/v1/scorpio/suggestions`, {
+          headers: { 'x-horizon-key': apiKey }
+        });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.suggestions) && data.suggestions.length > 0) {
+          renderPrompts(data.suggestions);
+        }
+      } catch (err) {}
+    }
+
+    // --- SIDEBAR & SESSION MANAGEMENT ---
+    async function loadSessions() {
+      if (!apiKey) return;
+      try {
+        const res = await fetch(`${API_ENDPOINT}/v1/scorpio/sessions`, {
           headers: { 'x-horizon-key': apiKey }
         });
         const data = await res.json();
@@ -380,4 +404,278 @@
           </div>
           <div>
             <h2 class="text-base font-semibold text-white">How can I help you today?</h2>
-            <p class="text-xs text-slate-4
+            <p class="text-xs text-slate-400 mt-1">Ask questions, analyze images and documents, write formulas, or automate business workflows.</p>
+          </div>
+          <div id="prompt-suggestions" class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 text-left"></div>
+        </div>
+      `;
+      loadDynamicSuggestions();
+    }
+
+    function startNewChat() {
+      currentSessionId = null;
+      localStorage.removeItem('hz_current_session');
+      document.getElementById('current-thread-title').textContent = 'New Conversation';
+      messageHistory = [];
+      showEmptyWelcome();
+      loadSessions();
+    }
+
+    async function deleteSession(e, id) {
+      e.stopPropagation();
+      if (!confirm('Delete this conversation?')) return;
+      try {
+        await fetch(`${API_ENDPOINT}/v1/scorpio/sessions/${id}`, {
+          method: 'DELETE',
+          headers: { 'x-horizon-key': apiKey }
+        });
+        if (currentSessionId === id) {
+          startNewChat();
+        } else {
+          loadSessions();
+        }
+      } catch (err) {
+        alert('Failed to delete session');
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      if (!apiKey) {
+        document.getElementById('key-modal').classList.remove('hidden');
+      } else {
+        verifyKeyAndStatus();
+        loadSessions();
+        if (currentSessionId) {
+          loadSessionMessages(currentSessionId);
+        } else {
+          loadDynamicSuggestions();
+        }
+      }
+    });
+
+    function promptKeyChange() {
+      document.getElementById('api-key-input').value = apiKey || '';
+      document.getElementById('key-modal').classList.remove('hidden');
+    }
+
+    function closeKeyModal() {
+      if (apiKey) document.getElementById('key-modal').classList.add('hidden');
+    }
+
+    function saveApiKey() {
+      const val = document.getElementById('api-key-input').value.trim();
+      if (!val) return;
+      apiKey = val;
+      localStorage.setItem('hz_scorpio_key', apiKey);
+      document.getElementById('key-modal').classList.add('hidden');
+      verifyKeyAndStatus();
+      loadSessions();
+      startNewChat();
+    }
+
+    async function verifyKeyAndStatus() {
+      const pulse = document.getElementById('status-pulse');
+      const tag = document.getElementById('model-tag');
+
+      try {
+        const res = await fetch(`${API_ENDPOINT}/v1/engine/status`, {
+          headers: { 'x-horizon-key': apiKey }
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Authentication rejected');
+
+        pulse.className = 'w-1.5 h-1.5 bg-emerald-400 rounded-full shadow-[0_0_6px_#34d399]';
+        tag.textContent = `Connected (${data.tier.toUpperCase()})`;
+      } catch (err) {
+        pulse.className = 'w-1.5 h-1.5 bg-red-400 rounded-full';
+        tag.textContent = `Connection failed (${err.message})`;
+      }
+    }
+
+    function checkEnter(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSend(e);
+      }
+    }
+
+    async function handleSend(e) {
+      e.preventDefault();
+      const inputEl = document.getElementById('user-input');
+      const sendBtn = document.getElementById('send-btn');
+      const text = inputEl.value.trim();
+      const imageToSend = stagedImageBase64;
+
+      if ((!text && !imageToSend) || !apiKey) return;
+
+      const welcomeCard = document.getElementById('welcome-card');
+      if (welcomeCard) welcomeCard.remove();
+
+      appendMessage('user', text, imageToSend);
+      inputEl.value = '';
+      clearAttachedImage();
+
+      sendBtn.disabled = true;
+      sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+      messageHistory.push({ role: 'user', content: text });
+      const loaderId = appendThinkingIndicator();
+      const statusLabel = document.getElementById('loader-status-text');
+
+      try {
+        const res = await fetch(`${API_ENDPOINT}/v1/scorpio/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-horizon-key': apiKey
+          },
+          body: JSON.stringify({
+            sessionId: currentSessionId,
+            messages: messageHistory,
+            imageBase64: imageToSend
+          })
+        });
+
+        if (!res.ok) throw new Error('Inference connection failed');
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop();
+
+          for (const part of parts) {
+            const trimmed = part.trim();
+            if (!trimmed.startsWith('data: ')) continue;
+            
+            let eventData;
+            try {
+              eventData = JSON.parse(trimmed.replace('data: ', ''));
+            } catch (err) {
+              continue;
+            }
+
+            if (eventData.type === 'status') {
+              if (statusLabel) statusLabel.textContent = eventData.text;
+            } else if (eventData.type === 'done') {
+              removeMessage(loaderId);
+
+              if (eventData.sessionId) {
+                currentSessionId = eventData.sessionId;
+                localStorage.setItem('hz_current_session', currentSessionId);
+              }
+
+              if (eventData.sessionTitle) {
+                document.getElementById('current-thread-title').textContent = eventData.sessionTitle;
+              }
+
+              const reply = eventData.response?.content || 'No response generated.';
+              messageHistory.push({ role: 'assistant', content: reply });
+              appendMessage('assistant', reply);
+
+              await loadSessions();
+            } else if (eventData.type === 'error') {
+              throw new Error(eventData.error);
+            }
+          }
+        }
+      } catch (err) {
+        removeMessage(loaderId);
+        appendErrorMessage(err.message);
+      } finally {
+        sendBtn.disabled = false;
+        sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+      }
+    }
+
+    function appendMessage(role, content, attachedImg = null) {
+      const stream = document.getElementById('chat-stream');
+      const msgDiv = document.createElement('div');
+      msgDiv.className = 'flex items-start space-x-3 text-sm';
+
+      if (role === 'user') {
+        msgDiv.className += ' justify-end';
+        let imgHtml = attachedImg ? `<img src="${attachedImg}" class="max-h-52 rounded-xl mb-2.5 border border-cyan-400/30 object-contain block shadow">` : '';
+        msgDiv.innerHTML = `
+          <div class="chat-bubble max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tr-sm bg-cyan-600 text-white px-4 py-2.5 shadow-sm leading-relaxed break-words">
+            ${imgHtml}
+            <div class="user-text-body"></div>
+          </div>
+        `;
+        const contentBox = msgDiv.querySelector('.user-text-body');
+        renderRichContent(content, contentBox);
+      } else {
+        msgDiv.innerHTML = `
+          <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-cyan-600 to-blue-500 flex items-center justify-center shrink-0 mt-0.5 shadow-md shadow-cyan-950">
+            <svg class="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <div class="chat-bubble max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tl-sm bg-slate-900 border border-slate-800/80 px-4 py-3 text-slate-200 shadow-sm leading-relaxed break-words">
+          </div>
+        `;
+        const contentBox = msgDiv.querySelector('.chat-bubble');
+        renderRichContent(content, contentBox);
+      }
+
+      stream.appendChild(msgDiv);
+      stream.scrollTop = stream.scrollHeight;
+    }
+
+    function appendThinkingIndicator() {
+      const stream = document.getElementById('chat-stream');
+      const id = 'loader-' + Math.random().toString(36).substring(2, 9);
+      const loaderDiv = document.createElement('div');
+      loaderDiv.id = id;
+      loaderDiv.className = 'flex items-start space-x-3 text-sm';
+      loaderDiv.innerHTML = `
+        <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-cyan-600 to-blue-500 flex items-center justify-center shrink-0 mt-0.5 animate-pulse">
+          <svg class="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
+        <div class="rounded-2xl rounded-tl-sm bg-slate-900 border border-slate-800 px-4 py-3 text-xs text-slate-400 flex items-center space-x-2">
+          <span id="loader-status-text">Scorpio is thinking...</span>
+          <span class="inline-flex space-x-1">
+            <span class="w-1 h-1 bg-cyan-400 rounded-full animate-bounce"></span>
+            <span class="w-1 h-1 bg-cyan-400 rounded-full animate-bounce [animation-delay:0.2s]"></span>
+            <span class="w-1 h-1 bg-cyan-400 rounded-full animate-bounce [animation-delay:0.4s]"></span>
+          </span>
+        </div>
+      `;
+      stream.appendChild(loaderDiv);
+      stream.scrollTop = stream.scrollHeight;
+      return id;
+    }
+
+    function appendErrorMessage(errText) {
+      const stream = document.getElementById('chat-stream');
+      const errDiv = document.createElement('div');
+      errDiv.className = 'p-3 rounded-xl bg-red-950/40 border border-red-900/60 text-xs text-red-300';
+      errDiv.textContent = `Error: ${errText}`;
+      stream.appendChild(errDiv);
+      stream.scrollTop = stream.scrollHeight;
+    }
+
+    function removeMessage(id) {
+      const el = document.getElementById(id);
+      if (el) el.remove();
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+  </script>
+</body>
+</html>
