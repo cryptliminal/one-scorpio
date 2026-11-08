@@ -67,13 +67,10 @@
         </div>
       </div>
       
-      <div class="flex items-center space-x-2.5">
-        <!-- Agent Mode Switch -->
-        <div id="agent-toggle-wrapper" class="hidden items-center space-x-2 bg-slate-900/80 border border-slate-800 px-3 py-1.5 rounded-lg shadow-sm">
-          <label for="agent-mode" class="text-xs text-slate-300 font-medium cursor-pointer select-none">Autonomous Agent</label>
-          <input type="checkbox" id="agent-mode" class="cursor-pointer accent-cyan-500 rounded w-3.5 h-3.5">
-        </div>
-
+      <div class="flex items-center space-x-2">
+        <button onclick="clearSavedChat()" title="Clear chat history" class="text-xs bg-slate-900 hover:bg-red-950/40 border border-slate-800 hover:border-red-900/50 px-2.5 py-1.5 rounded-lg text-slate-400 hover:text-red-300 font-medium transition shadow-sm">
+          Clear
+        </button>
         <button onclick="promptKeyChange()" class="text-xs bg-slate-900 hover:bg-slate-800 border border-slate-700/80 hover:border-slate-600 px-3 py-1.5 rounded-lg text-slate-300 font-medium transition shadow-sm">
           Settings
         </button>
@@ -184,7 +181,6 @@
     let activePrompts = [];
     let stagedImageBase64 = null;
 
-    // Fallback prompt pool displayed while the model generates fresh ones
     const FALLBACK_BANK = [
       {
         title: "Draft professional proposal",
@@ -208,60 +204,49 @@
       }
     ];
 
-    // Markdown & LaTeX Unified Parser (Shields all LaTeX brackets & slashes from marked)
     function renderRichContent(rawText, targetEl) {
       if (!rawText || !targetEl) return;
 
       const mathBlocks = [];
 
-      // 1. Shield display brackets \[ ... \]
       let safeText = rawText.replace(/\\\[([\s\S]+?)\\\]/g, (match) => {
         mathBlocks.push(match);
         return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
       });
 
-      // 2. Shield inline parentheses \( ... \)
       safeText = safeText.replace(/\\\(([\s\S]+?)\\\)/g, (match) => {
         mathBlocks.push(match);
         return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
       });
 
-      // 3. Shield display dollar signs $$ ... $$
       safeText = safeText.replace(/\$\$([\s\S]+?)\$\$/g, (match) => {
         mathBlocks.push(match);
         return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
       });
 
-      // 4. Shield inline dollar signs $ ... $
       safeText = safeText.replace(/\$([^\$\n]+?)\$/g, (match) => {
         mathBlocks.push(match);
         return `@@@MATH_BLOCK_${mathBlocks.length - 1}@@@`;
       });
 
-      // 5. Parse Markdown safely
       let parsedHtml = safeText;
       if (typeof marked !== 'undefined') {
-        marked.setOptions({
-          gfm: true,
-          breaks: true
-        });
+        marked.setOptions({ gfm: true, breaks: true });
         parsedHtml = marked.parse(safeText);
       }
 
-      // 6. Restore math expressions back into HTML
       parsedHtml = parsedHtml.replace(/@@@MATH_BLOCK_(\d+)@@@/g, (match, index) => {
         return mathBlocks[parseInt(index, 10)] || match;
       });
 
       targetEl.innerHTML = parsedHtml;
 
-      // 7. Render with KaTeX
       if (typeof renderMathInElement === 'function') {
         renderMathInElement(targetEl, {
           delimiters: [
             { left: '$$', right: '$$', display: true },
             { left: '$', right: '$', display: false },
-            { left: '\\[', right: '\\]', display: true },
+            { left: '[', right: ']', display: true },
             { left: '\\(', right: '\\)', display: false }
           ],
           throwOnError: false
@@ -269,7 +254,6 @@
       }
     }
 
-    // Image Upload & Clipboard Handling
     function handleFileSelect(e) {
       const file = e.target.files[0];
       if (file) processImageFile(file);
@@ -349,7 +333,45 @@
           renderPrompts(data.suggestions);
         }
       } catch (err) {
-        // Preserves fallback prompts if network or auth error occurs
+        // Preserves fallback prompts
+      }
+    }
+
+    async function loadSavedChatHistory() {
+      if (!apiKey) return;
+
+      try {
+        const res = await fetch(`${API_ENDPOINT}/v1/scorpio/history`, {
+          headers: { 'x-horizon-key': apiKey }
+        });
+        const data = await res.json();
+
+        if (data.success && Array.isArray(data.history) && data.history.length > 0) {
+          const welcomeCard = document.getElementById('welcome-card');
+          if (welcomeCard) welcomeCard.remove();
+
+          messageHistory = [];
+          data.history.forEach(item => {
+            messageHistory.push({ role: item.role, content: item.content });
+            appendMessage(item.role, item.content, item.image_url);
+          });
+        }
+      } catch (err) {
+        console.error('Could not load chat history:', err);
+      }
+    }
+
+    async function clearSavedChat() {
+      if (!apiKey || !confirm('Clear all conversation history for this account?')) return;
+
+      try {
+        await fetch(`${API_ENDPOINT}/v1/scorpio/history`, {
+          method: 'DELETE',
+          headers: { 'x-horizon-key': apiKey }
+        });
+        location.reload();
+      } catch (err) {
+        alert('Failed to clear history');
       }
     }
 
@@ -360,6 +382,7 @@
         document.getElementById('key-modal').classList.remove('hidden');
       } else {
         verifyKeyAndStatus();
+        loadSavedChatHistory();
       }
     });
 
@@ -382,12 +405,12 @@
       document.getElementById('key-modal').classList.add('hidden');
       verifyKeyAndStatus();
       loadDynamicSuggestions();
+      loadSavedChatHistory();
     }
 
     async function verifyKeyAndStatus() {
       const pulse = document.getElementById('status-pulse');
       const tag = document.getElementById('model-tag');
-      const agentWrapper = document.getElementById('agent-toggle-wrapper');
 
       try {
         const res = await fetch(`${API_ENDPOINT}/v1/engine/status`, {
@@ -400,13 +423,6 @@
         userTier = data.tier;
         pulse.className = 'w-1.5 h-1.5 bg-emerald-400 rounded-full shadow-[0_0_6px_#34d399]';
         tag.textContent = `Connected (${userTier.toUpperCase()})`;
-
-        if (data.agent_mode_unlocked) {
-          agentWrapper.classList.remove('hidden');
-          agentWrapper.classList.add('flex');
-        } else {
-          agentWrapper.classList.add('hidden');
-        }
       } catch (err) {
         pulse.className = 'w-1.5 h-1.5 bg-red-400 rounded-full';
         tag.textContent = `Connection failed (${err.message})`;
@@ -441,7 +457,6 @@
 
       messageHistory.push({ role: 'user', content: text });
 
-      const agentRequested = document.getElementById('agent-mode')?.checked || false;
       const loaderId = appendThinkingIndicator();
 
       try {
@@ -453,7 +468,6 @@
           },
           body: JSON.stringify({
             messages: messageHistory,
-            agentModeRequested: agentRequested,
             imageBase64: imageToSend
           })
         });
@@ -530,33 +544,4 @@
           </span>
         </div>
       `;
-      stream.appendChild(loaderDiv);
-      stream.scrollTop = stream.scrollHeight;
-      return id;
-    }
-
-    function appendErrorMessage(errText) {
-      const stream = document.getElementById('chat-stream');
-      const errDiv = document.createElement('div');
-      errDiv.className = 'p-3 rounded-xl bg-red-950/40 border border-red-900/60 text-xs text-red-300';
-      errDiv.textContent = `Error: ${errText}`;
-      stream.appendChild(errDiv);
-      stream.scrollTop = stream.scrollHeight;
-    }
-
-    function removeMessage(id) {
-      const el = document.getElementById(id);
-      if (el) el.remove();
-    }
-
-    function escapeHtml(str) {
-      return String(str)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-    }
-  </script>
-</body>
-</html>
+      stream.appendChild(loaderDiv
