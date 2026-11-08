@@ -73,9 +73,7 @@
     <div class="px-3.5 py-1 text-[10px] font-semibold tracking-wider uppercase text-slate-500">Recent Chats</div>
 
     <!-- Chat History List -->
-    <div id="session-list" class="flex-1 overflow-y-auto custom-scroll px-2 space-y-1 pb-4">
-      <!-- Session items will populate dynamically -->
-    </div>
+    <div id="session-list" class="flex-1 overflow-y-auto custom-scroll px-2 space-y-1 pb-4"></div>
   </aside>
 
   <!-- MAIN CHAT WORKSPACE -->
@@ -101,7 +99,7 @@
     <!-- CHAT STREAM CONTAINER -->
     <main class="w-full flex-1 overflow-y-auto px-4 py-6 custom-scroll space-y-6 max-w-3xl mx-auto" id="chat-stream">
       
-      <!-- Welcome Hero (Dynamic suggestions) -->
+      <!-- Welcome Hero -->
       <div id="welcome-card" class="text-center py-12 max-w-lg mx-auto space-y-4">
         <div class="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 mx-auto flex items-center justify-center text-cyan-400 shadow-xl">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -166,7 +164,7 @@
     </footer>
   </div>
 
-  <!-- KEY / SETTINGS MODAL -->
+  <!-- KEY MODAL -->
   <div id="key-modal" class="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-sm w-full space-y-5 shadow-2xl">
       <div>
@@ -191,7 +189,6 @@
     let apiKey = localStorage.getItem('hz_scorpio_key') || null;
     let currentSessionId = localStorage.getItem('hz_current_session') || null;
     let messageHistory = [];
-    let activePrompts = [];
     let stagedImageBase64 = null;
 
     const FALLBACK_BANK = [
@@ -202,8 +199,7 @@
     ];
 
     function toggleSidebar() {
-      const sb = document.getElementById('sidebar');
-      sb.classList.toggle('-ml-64');
+      document.getElementById('sidebar').classList.toggle('-ml-64');
     }
 
     function renderRichContent(rawText, targetEl) {
@@ -294,11 +290,10 @@
       const container = document.getElementById('prompt-suggestions');
       if (!container) return;
 
-      activePrompts = prompts;
-      container.innerHTML = activePrompts.map((item, index) => `
+      container.innerHTML = prompts.map(item => `
         <button 
           type="button"
-          onclick="selectPromptByIndex(${index})" 
+          onclick="populatePrompt(${JSON.stringify(item.prompt)})" 
           class="p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800/80 border border-slate-800 text-xs text-slate-300 transition text-left focus:outline-none focus:border-cyan-500/50 cursor-pointer">
           <div class="font-medium text-slate-200">${escapeHtml(item.title)}</div>
           <div class="text-[11px] text-slate-500 mt-0.5 truncate">${escapeHtml(item.desc)}</div>
@@ -306,12 +301,11 @@
       `).join('');
     }
 
-    function selectPromptByIndex(index) {
-      if (activePrompts[index]) {
-        const input = document.getElementById('user-input');
-        input.value = activePrompts[index].prompt;
-        input.focus();
-      }
+    function populatePrompt(text) {
+      const input = document.getElementById('user-input');
+      if (!input) return;
+      input.value = text;
+      input.focus();
     }
 
     async function loadDynamicSuggestions() {
@@ -344,17 +338,17 @@
         if (data.success && Array.isArray(data.sessions)) {
           data.sessions.forEach(ses => {
             const isActive = ses.id === currentSessionId;
-            const btn = document.createElement('div');
-            btn.className = `group flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer text-xs transition ${
+            const item = document.createElement('div');
+            item.className = `group flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer text-xs transition ${
               isActive ? 'bg-slate-800/90 text-white font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
             }`;
-            btn.innerHTML = `
+            item.innerHTML = `
               <span class="truncate flex-1" onclick="switchSession('${ses.id}', '${escapeHtml(ses.title)}')">${escapeHtml(ses.title)}</span>
               <button onclick="deleteSession(event, '${ses.id}')" class="opacity-0 group-hover:opacity-100 hover:text-red-400 p-1 text-slate-500 transition">
                 &times;
               </button>
             `;
-            listEl.appendChild(btn);
+            listEl.appendChild(item);
           });
         }
       } catch (err) {
@@ -363,14 +357,15 @@
     }
 
     async function switchSession(id, title) {
+      if (currentSessionId === id && messageHistory.length > 0) return;
       currentSessionId = id;
       localStorage.setItem('hz_current_session', id);
       document.getElementById('current-thread-title').textContent = title || 'Conversation';
       
       const stream = document.getElementById('chat-stream');
       stream.innerHTML = '';
-
       messageHistory = [];
+
       await loadSessionMessages(id);
       loadSessions();
     }
@@ -382,22 +377,23 @@
           headers: { 'x-horizon-key': apiKey }
         });
         const data = await res.json();
-        if (data.success && Array.isArray(data.messages)) {
+        if (data.success && Array.isArray(data.messages) && data.messages.length > 0) {
+          const welcomeCard = document.getElementById('welcome-card');
+          if (welcomeCard) welcomeCard.remove();
+
           data.messages.forEach(msg => {
             messageHistory.push({ role: msg.role, content: msg.content });
             appendMessage(msg.role, msg.content, msg.image_url);
           });
+        } else {
+          showEmptyWelcome();
         }
       } catch (err) {
         console.error('Error loading thread messages:', err);
       }
     }
 
-    function startNewChat() {
-      currentSessionId = null;
-      localStorage.removeItem('hz_current_session');
-      document.getElementById('current-thread-title').textContent = 'New Conversation';
-      
+    function showEmptyWelcome() {
       const stream = document.getElementById('chat-stream');
       stream.innerHTML = `
         <div id="welcome-card" class="text-center py-12 max-w-lg mx-auto space-y-4">
@@ -413,8 +409,15 @@
           <div id="prompt-suggestions" class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 text-left"></div>
         </div>
       `;
-      messageHistory = [];
       loadDynamicSuggestions();
+    }
+
+    function startNewChat() {
+      currentSessionId = null;
+      localStorage.removeItem('hz_current_session');
+      document.getElementById('current-thread-title').textContent = 'New Conversation';
+      messageHistory = [];
+      showEmptyWelcome();
       loadSessions();
     }
 
@@ -537,11 +540,12 @@
 
         if (!res.ok) throw new Error(data.error || 'Inference call failed');
 
-        // Update active session metadata
-        if (data.sessionId && !currentSessionId) {
+        // Bind newly created session ID immediately
+        if (data.sessionId) {
           currentSessionId = data.sessionId;
           localStorage.setItem('hz_current_session', currentSessionId);
         }
+
         if (data.sessionTitle) {
           document.getElementById('current-thread-title').textContent = data.sessionTitle;
         }
@@ -550,8 +554,8 @@
         messageHistory.push({ role: 'assistant', content: reply });
         appendMessage('assistant', reply);
 
-        // Refresh sidebar so new auto-generated title shows up immediately
-        loadSessions();
+        // Update sidebar with new session list and title
+        await loadSessions();
       } catch (err) {
         removeMessage(loaderId);
         appendErrorMessage(err.message);
